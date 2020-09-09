@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script>
+			const AudioContext = window.AudioContext || window.webkitAudioContext;
+
+			const SILENCE = "/silence.mp3";
+			const SLOW = "/9c88f930361c3a7de3191e81de6ed441.mp3";
+			const STORY = "https://stories-cdn.duolingo.com/audio/2331926f0fa7da3979b611955d00aaa7f7c2e7ec.mp3";
+			const STORY_PROXIED = "http://localhost:8080/proxy?url=https%3A%2F%2Fstories-cdn.duolingo.com%2Faudio%2F2331926f0fa7da3979b611955d00aaa7f7c2e7ec.mp3";
+			//const TTS = "/55a552d078f5e55d10b22f9a91710a7f.mp3";
+			const TTS = "https://d1vq87e9lcf771.cloudfront.net/miguel/0922845a69713e8fb04d9ed0979f33df";
+			const TTS_PROXIED = "http://localhost:8080/proxy?url=https%3A%2F%2Fd1vq87e9lcf771.cloudfront.net%2Fmiguel%2F0922845a69713e8fb04d9ed0979f33df";
+      const T2 = "https://cors-anywhere.herokuapp.com/stories-cdn.duolingo.com/audio/2331926f0fa7da3979b611955d00aaa7f7c2e7ec.mp3";
+
+			let lastAudio = null;
+			const cache = [];
+			let unlocked = false;
+
+			// Apart from being required to play audio without a HTMLAudioElement,
+			// creating an AudioContext also fixes a slight delay when (replaying)
+			// audio with the HTMLAudioElement on (desktop) Safari. Not sure why.
+			const context = new AudioContext();
+
+			/**
+			 * The Promisified version of decodeAudioData isn't supported by all browsers yet.
+			 */
+			const decode = (context, buffer) => new Promise((resolve, reject) => context.decodeAudioData(buffer, resolve, reject));
+
+      const play = (url, reuse) => {
+				if (!reuse) {
+					lastAudio = new Audio(url);
+				}
+				if (lastAudio) {
+					lastAudio.play();
+				}
+			};
+
+			const play2 = async (url) => {
+				if (context.state === "suspended") {
+					// Start the context on a user interaction.
+					context.resume();
+					console.assert(context.state === "running", "AudioContext not running.");
+				}
+				
+				if (!unlocked) {
+					// To unmute an AudioContext while the iPhone's mute switch
+					// is on, iOS requires playing audio with an HTMLAudioElement
+					// on a user interaction once.
+					const audio = new Audio(SILENCE);
+					await audio.play();
+					audio.pause();
+					unlocked = true;
+				}
+
+				if (!cache[url]) {
+					const response = await fetch(url);
+					// TODO: this seems to be an experimental API.
+					const buffer = await response.arrayBuffer();
+					const decodedData = await decode(context, buffer);
+
+					cache[url] = decodedData;
+				}
+
+				// A buffer source can only be played once, but it's safe to
+				// fire-and-forget.
+				const source = context.createBufferSource();
+				source.buffer = cache[url];
+				source.connect(context.destination);
+				source.start();
+			};
+
+			function playFn(url) {
+				play(url);
+			}
+
+			function play2Fn(url) {
+				play2(url);
+			}
+    </script>
+  </head>
+  <body>
+    <div
+      style="
+        display: grid;
+        grid-gap: 10px;
+        grid-template-columns: repeat(3, min-content);
+      "
+    >
+      <span>HTMLAudioElement</span>
+			<button onclick="playFn(TTS)">Play</button>
+			<button onclick="playFn(TTS, true)">Replay</button>
+      <span>Web Audio API</span>
+      <button onclick="play2Fn(TTS_PROXIED)">Play</button>
+		</div>
+		<p>
+			To verify if HTMLAudioElement's HTTP requests are cached:
+			<ol>
+				<li>Click Play.</li>
+				<li>Enable network throttling or go offline.</li>
+				<li>Click Replay to play the audio again, reusing the same element. The audio should play immediately in all browsers.
+				<li>Click Play again to create a fresh HTMLAudioElement. The audio should play immediately in Chrome and Firefox, but not in Safari.</li>
+			</ol>
+			The Safari network log should show a new request each time you click Play.
+		</p>
+		<p>
+			<em>Unrelated to the above.</em> The Web Audio method and unlocking hacks have been verified on:
+			<ul>
+				<li>Chrome 84 (macOS)</li>
+				<li>Firefox 79 (macOS)</li>
+				<li>Safari 13 (macOS)</li>
+				<li>Safari (iOS 11.4, iOS 13.6)</li>
+				<li>Chrome (Android XXX)</li>
+			</ul>
+		</p>
+  </body>
+</html>
